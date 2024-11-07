@@ -1,0 +1,205 @@
+---
+title: "Homework4"
+format: html
+editor: visual
+---
+
+## Homework 4: Linear Regression
+
+## Air Carolina Analysis
+
+The purpose of this analysis is to create a model that will help investors understand which new non-stop routes from Raleigh-Durham International Airport (RDU) are likely to have enough demand to make it worth it to create a new airline called Air Carolina. I will do this by analyzing different elements thought to affect air travel demand including population, income, and distance.
+
+## **Question 1:** 
+
+```{r}
+library(tidyverse)
+library(ggthemes)
+library(tidycensus)
+library(sf)
+
+```
+
+```{r}
+data = read_csv(here::here("Desktop", "plan372", "Homework4", "airport_pairs.csv"),
+ col_types = cols(
+    origin_cbsa = col_character(),
+    dest_cbsa = col_character()
+ ))
+
+head(data)
+
+```
+
+In this code, I opened the file from my computer and after answering the questions that appear later in this report, I came back and changes the origin and destination variables to be in the character format.
+
+```{r}
+filtered_data = data |>
+  filter(
+    (origin == "RDU" | dest == "RDU"), 
+    passengers > 10000
+  )
+  
+print(filtered_data)
+```
+
+I then filtered the data to only show flights that either leave or arrive in RDU and include flights only with more than 10000 passengers.
+
+## **Question 2:** 
+
+```{r}
+acs_vars = load_variables(2019, "acs5")
+```
+
+```{r}
+write_csv(acs_vars, "acsvars2.csv")
+```
+
+```{r}
+cbsa_data = get_acs(
+  geography= "cbsa", 
+  variables=c(
+    "total_population"="B01003_001",
+    "median_income"="B19013A_001"
+  ),
+  year=2019,
+  survey="acs5",
+  output="wide"
+)
+
+print(cbsa_data)
+```
+
+The next step was to retrieve the census data and I chose to do the 2019 census data because it is pretty close to the timeframe that we are analyzing the other data for. I then opened the csv file on my computer to find the codes for total population and median income so that I could find the data for those specific variables.
+
+```{r}
+origin_cbsa_data = cbsa_data |>
+  rename(origin_cbsa = GEOID, origin_population = total_populationE, origin_income = median_incomeE)
+
+destination_cbsa_data = cbsa_data |>
+  rename(dest_cbsa = GEOID, destination_population = total_populationE, destination_income = median_incomeE)
+
+print(origin_cbsa_data)
+```
+
+Then I used the rename function in order to standardize the column names so that I can align them and join them. I did two separate renamings so that I could have the origin and destination data separate for analysis later.
+
+```{r}
+joined_data = data |>
+  left_join(origin_cbsa_data, by = "origin_cbsa") |>
+  left_join(destination_cbsa_data, by = "dest_cbsa")
+
+print(joined_data)
+```
+
+Then I joined the data together using the left_join command
+
+```{r}
+cbsa_volumes = joined_data |>
+  group_by(origin_cbsa, dest_cbsa) |>
+  summarize(total_passengers_cbsa = sum(passengers)) |>
+  ungroup()
+
+print(cbsa_volumes)
+
+```
+
+The next thing that I did was use the group_by and summarize functions to group the data by CSBA pairs instead of individual airports, so we can see the total number of passengers traveling between each origin and destination CBSA. Some metro areas, have multiple airports so we group by area rather than airport in order to make it easier to analyze.
+
+```{r}
+ggplot(joined_data, aes(x=origin_population, y=passengers)) +
+  geom_point(size=0.2)
+```
+
+This graph of origin population vs passengers shows that as the population increases, the number of passengers also increases. This makes sense conceptually because if there are more people that live in a specific area, there are more likely more people that are going to be flying. The same is true for the destination population trend below.
+
+```{r}
+ggplot(joined_data, aes(x=destination_population, y=passengers)) +
+  geom_point(size=0.2)
+```
+
+```{r}
+ggplot(joined_data, aes(x=distancemiles, y=passengers)) +
+  geom_point(size=0.1)
+```
+
+The graph of distance in miles vs passengers shows that as the distance increases, the number of passengers decreases. This makes sense conceptually because longer flights are less appealing and a lot more expensive than shorter flights. Also a lot more people fly domestically rather than internationally because they dont need to.
+
+**Extra Credit: Analyzing Median Income vs Passenger Numbers**
+
+```{r}
+ggplot(joined_data, aes(x=origin_income, y=passengers)) +
+  geom_point(size=0.2)
+```
+
+```{r}
+ggplot(joined_data, aes(x=destination_income, y=passengers)) +
+  geom_point(size=0.2)
+```
+
+Both graphs representing income show the same trend: as the income of people increases in an area, the number of passengers increases as well. This also makes sense becaue people who have more money are more likely to spend it flying and traveling because they have the extra spending money to do that.
+
+## **Question 3:** 
+
+```{r}
+joined_data = joined_data |>
+  left_join(cbsa_volumes, by = c("origin_cbsa", "dest_cbsa"))
+head(joined_data)
+```
+
+```{r}
+regression_model = lm(total_passengers_cbsa ~ origin_population + destination_population + distancemiles + origin_income + destination_income, data=joined_data)
+
+summary(regression_model)
+```
+
+The regression results show that each factor has a significant impact on passenger numbers. For the first coefficient, origin_population, we see an estimate value of 0.04 which tells us that for every additional person in the origin's population, there are about 0.04 more passengers. This makes sense because a larger population usually means that there are going to be more people traveling from that origin. The same occurs for the destination population, where an increase in population leads to about 0.04 more passengers. The third coefficient is distancemiles with a value of -41.7, this value tells us that for every additional mile added to a flight, the passenger numbers decrease by about 41.7. This makes sense conceptually because longer flights are generally more expensive, more unnecessary (as most people fly within the country and to nearby states) and more appealing. The fourth and fifth coefficients are origin_income and destination_income. Both have a value of about 0.8 which tells us that as the average income of people at the origin and destination increases, the number of passengers also increases by about 0.8. This makese sense conceptually because wealthier people are more likely to spend money on flights because they have the extra income to do it.
+
+The standard error values are important as well because they tell us how much variation there may be in the sample. The t-values and Pr(\>\|t\|) are important because they help us to determine the significance of our data. Because they are all less than 0.05, we know that all of this data is significant, thus meaning that these factors definitely play a role in the discrepancies seen in flying patterns. The R-squared value tells us how well the variables we chose to analyze explain our data. Because we got an R-squared value of 0.30, we say that the model explains about 30% of the variation in passenger numbers. This is a realtively okay value because it tells us that these factors we chose, income, population, and distance definitely play a role in flying rates but since the value is not close to 1, we know that there are other factors at play.
+
+## **Question 4:** 
+
+```{r}
+newcities_data = tribble(
+  ~origin_cbsa, ~dest_cbsa, ~origin_population, ~destination_population, ~origin_income, ~destination_income, ~distancemiles,
+  "RDU",        "Portland",     1332311,     2445761,   83852,  76277,  2363,
+  "RDU",        "El Paso",      1332311,     840477,    83852,  48005,  1606,
+  "RDU",        "Tallahassee",  1332311,     202221,    83852,  49077,  496,
+  "RDU",        "Sacramento",   1332311,     2315980,   83852,  76795,  2345
+)
+
+print(newcities_data)
+```
+
+```{r}
+newcities_data$forecast_passenger_demand = predict(regression_model, newcities_data)
+newcities_data
+```
+
+```{r}
+reversed_data = tribble(
+  ~origin_cbsa, ~dest_cbsa, ~origin_population, ~destination_population, ~origin_income, ~destination_income, ~distancemiles,
+  "Portland",    "RDU",        2445761,     1332311,   76277,  83852,  2363,
+  "El Paso",     "RDU",        840477,      1332311,   48005,  83852,  1606,
+  "Tallahassee", "RDU",        202221,      1332311,   49077,  83852,  496,
+  "Sacramento",  "RDU",        2315980,     1332311,   76795,  83852,  2345
+)
+
+print(reversed_data)
+```
+
+```{r}
+reversed_data$forecast_passenger_demand = predict(regression_model, reversed_data)
+reversed_data
+```
+
+```{r}
+combined_data = bind_rows(newcities_data, reversed_data)
+print(combined_data)
+```
+
+The final part of this analyis was to analyze the four potential new direct-flights that Air Carolina would offer to see if they are worth it to create or not. I did this by following the model form the in-class exercise where we use the tribble command and input all the data by hand for each of the four new cities. Since we had all this information from earlier, I went through the table to find all the values. I struggled with finding values for the Tallahassee flights so I did google some of that information to try to get the most accurate information as possible. Then I used the predict command to try to predict the passenger demand for each flight path. Since we needed information going both ways, I also reversed the destination and arrival data and it gave me slightly different values. I then create a combined data table in order to put all 8 flight paths into one table to look at.
+
+My results show that all of my 8 values for potential passenger demand are negative which to me signals that I did something wrong in this part of the model because this is not exactly expected. A negative number indicates that the path is very unfavorable and actually would not be a good choice for the airline. If this is accurate, I am shocked by this information because most of these paths go to busy cities and I would expect at least one or two of them to prove beneficial. From this data, however, I would conclude that Portland is the strongest path because it is the least negative. I have reason to believe that there is error in this conclusion because from the previous analysis, we found that paths with a longer distance are less likely to have a high amount of passengers and seeing as Portland is the furthest away, this wouldnt make senes that it has the highest number of potential passengers.
+
+Based on the R2 value being 0.30, I am led to believe that this data is not very accurate and I am not very confident in the projection. I believe that in order to make these results truly accurate, other measures need to be taken into account.
